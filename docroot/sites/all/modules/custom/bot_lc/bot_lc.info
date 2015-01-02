@@ -1,0 +1,9 @@
+name = Bot lamercounter
+package = Bot
+description= "Did you do something really stupid? IRC should know about it. Type lc in irc to add one to your counts."
+
+dependencies[] = bot
+
+core = 7.x
+
+files[] = bot_lc.module

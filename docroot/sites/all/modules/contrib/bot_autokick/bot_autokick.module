@@ -1,0 +1,56 @@
+<?php
+
+/**
+ * Implements hook_menu().
+ */
+function bot_autokick_menu() {
+  $items = array();
+
+  $items['admin/config/bot/autokick'] = array(
+    'title' => 'Bot autokick',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('bot_autokick_settings'),
+    'access arguments' => array('administer bot'),
+  );
+  return $items;
+}
+
+function bot_autokick_settings() {
+  $form['bot_autokick_whitelist_users'] = array(
+    '#type' => 'textarea',
+    '#title' => t('Whitelisted users'),
+    '#default_value' => variable_get('bot_autokick_whitelist_users', ''),
+  );
+  $form['bot_autokick_blacklist_words'] = array(
+    '#type' => 'textarea',
+    '#title' => t('Blacklisted words'),
+    '#default_value' => variable_get('bot_autokick_blacklist_words', ''),
+  );
+  return system_settings_form($form);
+}
+
+function bot_autokick_irc_msg_query($data) {
+  bot_autokick_irc_msg_channel($data, TRUE);
+}
+
+function bot_autokick_irc_msg_channel($data, $from_query = FALSE) {
+  $to = $from_query ? $data->nick : $data->channel;
+  if (bot_autokick_whitelisted_user($data->nick)) return;
+  $addressed = bot_name_regexp();
+  $words = explode("\n", variable_get('bot_autokick_blacklist_words', ''));
+  foreach ($words as $word) {
+    $word = trim($word);
+    if (preg_match("/$word/i", $data->message, $matches)) {
+      bot_chanop_kick(array('channel' => $data->channel, 'nick' => $data->nick));
+    }
+  }
+}
+
+function bot_autokick_whitelisted_user($nick) {
+  $nicks = variable_get('bot_autokick_whitelist_users', '');
+  $nicks = explode("\n", $nicks);
+  foreach ($nicks as $cleared) {
+    if (trim(strtolower($nick)) == trim(strtolower($cleared))) return TRUE;
+  }
+  return FALSE;
+}

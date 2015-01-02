@@ -1,0 +1,23 @@
+<?php
+
+function bot_lc_schema() {
+  $schema = array();
+  $schema['bot_lc'] = array(
+    'description' => t('Store lamercounts for nicks.'),
+    'fields' => array(
+      'irc_nick' => array(
+        'description' => t('The nick that was calls the count.'),
+        'type' => 'varchar',
+        'length' => 64,
+        'default' => '',
+        'not null' => TRUE,
+      ),
+      'count' => array(
+        'description' => t('Number of lamercounts.'),
+        'type' => 'int',
+        'default' => 0,
+      ),
+    ),
+  );
+  return $schema;
+}

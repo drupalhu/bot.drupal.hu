@@ -1,0 +1,9 @@
+name = Bot Weather
+description = Provide weather information onto IRC
+
+core = 7.x
+dependencies[] = bot
+dependencies[] = libraries
+dependencies[] = geocoder
+
+package = Bot

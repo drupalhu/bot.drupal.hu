@@ -1,0 +1,47 @@
+<?php
+
+/**
+ * Implements hook_schema().
+ */
+function bot_api_schema() {
+  $schema['bot_api'] = array(
+    'description' => 'The base table for API functions for bot to look-up.',
+    'fields' => array(
+      'fid' => array(
+        'description' => 'The primary identifier for a function.',
+        'type' => 'serial',
+        'unsigned' => TRUE,
+        'not null' => TRUE
+      ),
+      'name' => array(
+        'description' => 'The function name.',
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'signature' => array(
+        'description' => 'The function signature.',
+        'type' => 'varchar',
+        'length' => 511, // 255 is not enough.
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'branch' => array(
+        'description' => 'Branch version of the API where this function is from.',
+        'type' => 'int',
+      ),
+      'summary' => array(
+        'description' => 'Summary of the function.',
+        'type' => 'text',
+        'not null' => TRUE,
+      ),
+    ),
+    'primary key' => array('fid'),
+    'indexes' => array(
+      'bot_api_branch' => array('branch'),
+      'bot_api_branch_name' => array('branch', 'name'),
+    ),
+  );
+  return $schema;
+}

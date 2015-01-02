@@ -1,0 +1,5 @@
+name = Bot Search
+package = Bot
+description = Perform a web search from IRC. Currently only supports google.
+dependencies[] = bot
+core = 7.x

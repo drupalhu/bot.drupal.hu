@@ -1,0 +1,38 @@
+<?php
+
+/**
+ * @file
+ * Database schema to store bans.
+ */
+
+/**
+ * Implementation of hook_schema().
+ */
+function bot_chanop_schema() {
+  $schema = array();
+  $schema['bot_chanop_bans'] = array(
+    'description' => t('Store temporary bans for scheduled removal.'),
+    'fields' => array(
+      'irc_nick' => array(
+        'description' => t('The nick that was banned.'),
+        'type' => 'varchar',
+        'length' => 64,
+        'default' => '',
+        'not null' => TRUE,
+      ),
+      'channel' => array(
+        'description' => t('Channel the user was banned from.'),
+        'type' => 'varchar',
+        'length' => 128,
+        'default' => '',
+        'not null' => TRUE,
+      ),
+      'expires' => array(
+        'description' => t('Timestamp when this ban should expire.'),
+        'type' => 'int',
+        'default' => 0,
+      ),
+    ),
+  );
+  return $schema;
+}

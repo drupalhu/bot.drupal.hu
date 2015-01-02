@@ -1,0 +1,11 @@
+name = Bot autokick
+description = Protect a channel by automatically kicking out users who say the wrong things.
+
+core = 7.x
+
+package = Bot extras
+
+dependencies[] = bot
+dependencies[] = bot_chanop
+
+files[] = bot_autokick.module

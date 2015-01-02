@@ -1,0 +1,203 @@
+<?php
+
+define('DAY', 84600);
+define('WEEK', 604800);
+
+/**
+ * Implements hook_menu().
+ */
+function bot_api_menu() {
+  $items['admin/config/bot/api'] = array(
+    'access arguments'  => array('administer bot'),
+    'description'       => 'Configure the API lookup with these settings.',
+    'page callback'     => 'drupal_get_form',
+    'page arguments'    => array('bot_api_settings'),
+    'title'             => 'Bot API',
+    'file'              => 'bot_api.admin.inc',
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_cron().
+ */
+function bot_api_cron() {
+  // How frequently the API should update.
+  $timeout = variable_get('bot_api_update_period', WEEK);
+  $last_run = variable_get('bot_api_last_run', array(5 => 0, 6 => 0, 7 => 0));
+
+  $queue = DrupalQueue::get('bot_api_update');
+  $now = time();
+  foreach ($last_run as $branch => $last_update) {
+    if ($last_update + $timeout < $now) {
+      bot_api_update($branch);
+      $queue->createItem($branch);
+    }
+  }
+}
+
+/**
+ * Implements hook_cron_queue_info().
+ */
+function bot_api_cron_queue_info() {
+  $queues['bot_api'] = array(
+    'worker callback' => 'bot_api_update',
+    'time' => 60,
+  );
+  return $queues;
+}
+
+/**
+ * Fetch the function dump for a given branch version.
+ */
+function bot_api_update($branch) {
+  $remote_url = variable_get('bot_api_api_site', 'http://api.drupal.org');
+  $remote_url .= "/api/function_dump/$branch";
+  watchdog('bot_api', 'Updating branch @branch from !url', array('@branch' => $branch, '!url' => $remote_url), WATCHDOG_NOTICE);
+  $result = drupal_http_request($remote_url);
+  if ($result->code != 200) {
+    watchdog('bot_api', 'Update failed with error: %error', array('%error' => $result->code), WATCHDOG_ERROR);
+  }
+
+  $data = bot_api_parse_dump($result->data);
+  bot_api_update_data($branch, $data);
+  unset($result);
+  unset($data);
+
+  // Now update the last run flag. We do it here, because
+  // we can't know when the queue will run this job.
+  $last_run = variable_get('bot_api_last_run', array(5 => 0, 6 => 0));
+  $last_run[$branch] = time();
+  variable_set('bot_api_last_run', $last_run);
+}
+
+function bot_api_update_data($branch, $data = array()) {
+  // Delete all functions from this branch (instead of trying to figure out new and updated functions).
+  db_delete('bot_api')->condition('branch', $branch)->execute();
+ 
+  // Break up the insert into manageable chunks and run them.
+  $batch_size = 100;
+  $loops = (count($data) > $batch_size) ? ceil(count($data)/$batch_size) : 1;
+  watchdog('bot_api', '@count functions fetched for branch %branch, processing in @number loops, @size each.',
+    array('@count' => count($data), '%branch' => $branch, '@number' => $loops, '@size' => $batch_size), WATCHDOG_NOTICE);
+
+  for ($i = 0; $i < $loops; $i++) {
+    $insert = db_insert('bot_api')->fields(array('name', 'branch', 'signature', 'summary'));
+    foreach ($data as $key => $function) {
+      $function['branch'] = $branch;
+      $function['signature'] = serialize($function['signature']);
+      $insert->values($function);
+      // Now remove this entry from the main array so it is not repeated.
+      unset($data[$key]);
+    }
+    $insert->execute();
+  }
+}
+
+/**
+ * Load a function from the database.
+ */
+function bot_api_function_load($branch, $name) {
+  $function = db_select('bot_api', 'ba')
+    ->fields('ba', array('name', 'signature', 'branch', 'summary'))
+    ->condition('branch', $branch)->condition('name', $name)->execute()->fetchObject();
+  $function->signature = unserialize($function->signature);
+  return $function;
+}
+
+/**
+ * Parse the complete function dump.
+ */
+function bot_api_parse_dump($dump) {
+  $rows = explode("\n", $dump);
+  foreach ($rows as $id => $row) {
+    $line = explode('###', $row);
+    // There is a possibility that the summary spans to multiple lines.
+    // We ignore this case, it should be fixed in api.
+    if (count($line) != 2) continue;
+
+    // $line[0] is function and its argument. We trim so that trailing newspace doesn't mess with our shiny regex.
+    $match = preg_match_all('!^([a-zA-Z0-9_]+)\((.*)\)!m', trim($line[0]), $matches, PREG_SET_ORDER);
+    if ($match) {
+      $function['name'] = $matches[0][1];
+      $signature = explode(', ', $matches[0][2]);
+      $function['signature'] = empty($signature[0]) || !$signature ? array() : $signature; // explode returns FALSE if string is empty.
+      $function['summary'] = trim($line[1]); // The second bit of the exploded row, after the ### comes the summary.
+      $data[] = $function;
+    }
+  }
+  return $data;
+}
+
+/**
+ * Listen for URLs or a numerical ID and respond with information about it.
+ *
+ * @param $data
+ *   The regular $data object prepared by the IRC library.
+ * @param $from_query
+ *   Boolean; whether this was a queried request.
+ */
+function bot_api_irc_msg_channel($data, $from_query = FALSE) {
+  $to = $from_query ? $data->nick : $data->channel;
+
+  if (preg_match('/^(\w*):?([\w\-]*)\?$/', $data->messageex[0], $matches)) {
+    $function_name = $matches[1];
+    $branch = $matches[2] ? $matches[2] : variable_get('bot_api_default_branch', 7);
+    if (!$function_name) { return; } // some modules have bad docs that allow "?" to match incorrectly.
+
+    $function = bot_api_load_function($branch, $function_name);
+
+    if ($function->fid) {
+      // build up the actual message for spitting.
+      if (!$function->summary) {
+        $function->summary = t('[There is no summary! This is a bug. File a patch!]');
+      }
+      if (preg_match("/\n/", $function->summary)) {
+        $function->summary = t('[Documented summary is not one line. This is a bug. File a patch!]');
+      }
+      $message = t('!function: !summary => !function(!signature) => !url', 
+        array(
+          '!function' => $function->name,
+          '!signature' => implode(', ', $function->signature),
+          '!summary' => $function->summary,
+          '!url' => strtr(bot_api_branch_url($function->branch), array('!function' => $function->name))
+        )
+      );
+      bot_message($to, $message);
+    }
+  }
+}
+
+function bot_api_load_function($branch, $name) {
+  $result = db_select('bot_api', 'ba')
+    ->fields('ba', array('fid', 'name', 'branch', 'signature', 'summary'))
+    ->condition('branch', $branch)
+    ->condition('name', $name)
+    ->execute();
+
+  $functions = array();
+  foreach ($result as $function) {
+    $function->signature = unserialize($function->signature);
+    $functions[] = $function;
+  }
+  return $functions[0];
+}
+
+/**
+ * All responses are available via a query.
+ */
+function bot_api_irc_msg_query($data) {
+  bot_api_irc_msg_channel($data, TRUE);
+}
+
+/**
+ * Quickie branch URL generation, without url().
+ *
+ * @param $branch
+ *   The name of the branch to create a URL to.
+ * @return $url
+ *   A FQDN with %function ready to be replaced.
+ */
+function bot_api_branch_url($branch) {
+  return variable_get('bot_api_branch_' . $branch . '_url', 'http://api.drupal.org/api/function/!function/' . $branch);
+}

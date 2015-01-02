@@ -1,0 +1,8 @@
+name = Bot API
+description = Integration with the api module, performing remote lookups of Drupal API functions.
+
+core = 7.x
+files[] = bot_api.module
+files[] = bot_api.admin.inc
+files[] = bot_api.controller.inc
+files[] = bot_api.test

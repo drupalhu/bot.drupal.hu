@@ -1,0 +1,187 @@
+<?php
+
+/**
+ * @file
+ * Channel operator module for the bot.
+ */
+ 
+/**
+ * Implements hook_perm().
+ */
+function bot_chanop_permission() {
+  return array(
+    'access channel operations' => array(
+      'title' => t('Access channel operations'),
+      'description' => t('I dont really know what this perm does.'),
+    )
+  );
+}
+
+/**
+ * Implementatoin of hook_help().
+ */
+function bot_chanop_help($path, $arg) {
+  switch ($path) {
+  case 'irc:features': 
+    return array(t('chanop'));
+  case 'irc:features#chanop':
+    $botname = variable_get('bot_nickname', 'bot_module');
+    $commands = bot_chanop_commands();
+    $commands = array_keys($commands);
+    $commands = implode(', ', $commands);
+    return t('Usage: @botname <command> <user> [channel] (optional). Issue an IRC operator command against user. If channel not given active one is assumed (it is required in private messaging). Available commands: @commands.', array('@botname' => $botname, '@commands' => $commands));
+  }
+}
+
+function bot_chanop_irc_msg_channel($data, $from_query = FALSE) {
+  global $irc;
+  $to = $from_query ? $data->nick : $data->channel;
+  $addressed = bot_name_regexp();
+  $commands = bot_chanop_commands();
+  // TODO do it with match_array if there is such.
+  foreach ($commands as $command => $signature) {
+    $regex = '^' . $addressed . '\s' . $command . '\s' . $signature['regexp'] . '$';
+    // If we are in a channel then optional channel arguments are optional.
+    if (preg_match("/^$regex/i", $data->message, $matches)) {
+
+      if (bot_auth_access('access channel operations', $data)) {
+        $userargs = bot_chanop_process_args($signature, $matches, $data);
+
+        if (isset($signature['callback']) && function_exists($signature['callback'])) {
+          call_user_func_array($signature['callback'], $userargs);
+        }
+      }
+      else {
+        bot_message($to, t('You are not authorised to issue this command.'));
+      }
+    }
+  }
+}
+
+function bot_chanop_kick($userargs) {
+  global $irc;
+  bot_chanop_make_op($userargs);
+  $irc->kick($userargs['channel'], $userargs['nick']);
+  bot_chanop_demote_op($userargs);
+}
+
+/**
+ * Promote the bot to operator status in the current channel.
+ */
+function bot_chanop_make_op($userargs) {
+  bot_message('ChanServ', 'op ' . $userargs['channel']);
+}
+
+/**
+ * Promote the bot to operator status in the current channel.
+ */
+function bot_chanop_demote_op($userargs) {
+  bot_message('ChanServ', 'deop ' . $userargs['channel']);
+}
+
+function bot_chanop_irc_msg_query($data) {
+  bot_chanop_irc_msg_channel($data, TRUE);
+}
+
+/**
+ * Return the commands and their signature for easier regexp parsing.
+ */
+function bot_chanop_commands($reset = FALSE) {
+  static $commands = array();
+  if (empty($commands) || $reset) {
+    $commands = array(
+      // Record arguments if they are required (TRUE) or optional (FALSE).
+      'op' => array(
+        'arguments' => array('nick' => TRUE, 'channel' => FALSE),
+      ),
+      'deop' => array(
+        'arguments' => array('nick' => TRUE, 'channel' => FALSE),
+      ),
+      'voice' => array(
+        'arguments' => array('nick' => TRUE, 'channel' => FALSE),
+      ),
+      'devoice' => array(
+        'arguments' => array('nick' => TRUE, 'channel' => FALSE),
+      ),
+      'invite' => array(
+        'arguments' => array('nick' => TRUE, 'channel' => FALSE),
+      ),
+      // <channel> <nick> :[msg]
+      'kick' => array(
+        'callback' => 'bot_chanop_kick',
+        'requisites' => 'bot_chanop_make_op',
+        'arguments' => array('nick' => TRUE),
+      ),
+      'ban' => array(
+        'arguments' => array('nick' => TRUE, 'channel' => FALSE, 'period' => FALSE),
+        'callback' => 'bot_chanop_ban',
+      ),
+      'unban' => array(
+        'arguments' => array('nick' => TRUE, 'channel' => FALSE),
+        'callback' => 'bot_chanop_unban',
+      ),
+    );
+    foreach ($commands as $command => $signature) {
+      $commands[$command]['regexp'] =  _bot_chanop_calculate_regexp($signature['arguments']);
+    }
+
+  }
+  return $commands;
+}
+
+/**
+ * Create a regexp that captures the required arguments.
+ */
+function _bot_chanop_calculate_regexp($arguments) {
+  foreach ($arguments as $argument => $required) {
+      $regexp[] = '(.*?)';
+      /*
+    if (isset($required)) {
+      $regexp[] = '(.*?)';
+    }
+    else {
+      $regexp[] = $argument;
+    }
+       */
+  }
+  return implode("\s", $regexp);
+}
+
+function bot_chanop_process_args($signature, $matches, $data) {
+  array_shift($matches); // The full user message.
+  array_shift($matches); // The name of the bot.
+  $arguments = array_keys($signature['arguments']);
+  foreach ($arguments as $key => $name) {
+    $userargs[$name] = $matches[$key];
+  }
+  if (!isset($userargs['channel'])) { // Channel is optional then it is the current channel.
+    $userargs['channel'] = $data->channel;
+
+  }
+  return $userargs;
+}
+
+function bot_chanop_bot_cron() {
+  $result = db_select('bot_chanop_bans', 'bcb')->fields('bcb', array('irc_nick'))->condition('expires', time(), '<')->execute();
+  foreach ($result as $irc_user) {
+    bot_chanop_unban($irc_user->nick);
+  }
+}
+
+/**
+ * Drupal side of the unban, the actuall banning happens via the $irc!
+ */
+function bot_chanop_unban($nick, $channel) {
+  db_delete('bot_chanop_bans')->condition('nick', $nick)->condition('channel', $channel)->execute();
+}
+
+function bot_chanop_ban($nick, $channel, $period = NULL) {
+  $expires = isset($period) ? time() + $period * 60 : 1250280000; // 2070, far.
+  $previous = db_select('bot_chanop_bans')->fields(array('irc_nick'))->condition('nick', $nick)->condition('channel', $channel)->fetchField();
+  if (empty($previous)) {
+    db_update('bot_chanop_bans')->condition('nick', $nick)->condition('channel', $channel)->fields(array('period' => $period))->execute();
+  }
+  else {
+    db_insert('bot_chanop_bans')->fields(array('nick' => $nick, 'channel' => $channel, 'period' => $period))->execute();
+  }
+}

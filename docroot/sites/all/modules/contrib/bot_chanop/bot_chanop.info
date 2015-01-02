@@ -1,0 +1,11 @@
+name = Bot chanop
+description = Provide channel operator functions through the bot.
+
+core = 7.x
+
+package = Bot extras
+
+dependencies[] = bot
+dependencies[] = bot_auth
+
+files[] = bot_chanop.module

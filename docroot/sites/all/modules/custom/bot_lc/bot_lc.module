@@ -1,0 +1,25 @@
+<?php
+
+/**
+ * Verify if a user is authenticated to chanserv.
+ */
+function bot_lc_verify() {
+  // Do a whois
+}
+
+function bot_lc_irc_msg_channel($data, $from_query = FALSE) {
+  $to = $from_query ? $data->nick : $data->channel;
+  $url = 'http://dawn.royalcomp.hu/~raas/lc.html';
+  $addressed = bot_name_regexp();
+  if (preg_match("/^lc$/i", $data->message)) {
+    $result = drupal_http_request($url);
+    $regexp = "<img\s[^>]*alt=\"(.*)\"[^>]*>";
+    if (preg_match_all("/$regexp/siU", $result->data, $matches, PREG_SET_ORDER)) {
+      $standing = utf8_encode(html_entity_decode($matches[2][1]));
+      //$reply = "Gratulálok, sikeresen pörgettel egyet a lammerszámlálón. A jelenlegi állás: ". $allas .".";
+      $reply = t('Congratulations, you successfully rolled one on the lamercounter. Current standing: @standing.', array('@standing' => $standing));
+      bot_message($to, $reply);
+    }
+    return;
+  }
+}

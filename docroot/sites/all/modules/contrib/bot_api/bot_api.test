@@ -1,0 +1,88 @@
+<?php
+
+/**
+ * @file
+ * Tests for Bot API.
+ */
+
+class BotApiTestCase extends DrupalWebTestCase {
+  public function setUp() {
+    parent::setUp('bot_api');
+    $this->dump = '
+      _taxonomy_category_into_term($node) ### Converts a category object (as returned by many category API
+      functions) into a term array.
+      _taxonomy_node_form_validate(&$form, &$form_state) ### Node form validation handler
+      ab_schema() ### Implementation of hook_schema().
+      ab_perm() ### .';
+
+  }
+  public function getInfo() {
+    return array(
+      'name' => 'Bot API parsing functionality',
+      'description' => 'Test the parsing and data handling of Bot API.',
+      'group' => 'Bot API',
+    );
+  }
+
+  /**
+   * Test the import and database storage.
+   */
+  public function testImport() {
+    // Same steps as when the dump is downloaded.
+    $data = bot_api_parse_dump($this->dump);
+    bot_api_update_data(6, $data);
+
+    // Now we should have these in the database.
+    $function = bot_api_function_load(6, '_taxonomy_node_form_validate');
+
+    $this->assertEqual($function->name, '_taxonomy_node_form_validate', t('Function name loaded.'));
+    $this->assertEqual($function->summary, 'Node form validation handler', t('Summary loaded.'));
+    $this->assertEqual($function->signature, array('&$form', '&$form_state'), t('Signature loaded.'));
+  }
+
+  /**
+   * Test the dump parsing.
+   */
+  public function testDumpParsing() {
+    // A manually parsed reference result.
+    $reference = array(
+      0 => array(
+        'name' => '_taxonomy_category_into_term', 
+        'summary' => 'Converts a category object (as returned by many category API functions) into a term array.',
+        'signature' => array('$node'),
+      ),
+      1 => array(
+        'name' => '_taxonomy_node_form_validate', 
+        'summary' => 'Node form validation handler',
+        'signature' => array('&$form', '&$form_state'),
+      ),
+      2 => array(
+        'name' => 'ab_schema', 
+        'summary' => 'Implementation of hook_schema().',
+        'signature' => array(),
+      ),
+      3 => array(
+        'name' => 'ab_perm', 
+        'summary' => '.',
+        'signature' => array(),
+      ),
+    );
+    $parsed = bot_api_parse_dump($this->dump);
+
+    // Function where description is on multiple lines.
+    $this->assertEqual($parsed[0]['name'], $reference[0]['name'], t('Multiple line function name parsed.'));
+    $this->assertEqual($parsed[0]['summary'], $reference[0]['summary'], t('Multiple line function summary parsed.'));
+    $this->assertEqual($parsed[0]['signature'], $reference[0]['signature'], t('Multiple line function signature parsed'));
+
+    // Multiple arguments.
+    $this->assertEqual($parsed[1]['signature'], $reference[1]['signature'], t('Multiple arguments parsed.'));
+
+    // Empty signature.
+    $this->assertEqual($parsed[2]['summary'], $reference[2]['summary'], t('Summary line parsed.'));
+    $this->assertEqual($parsed[2]['signature'], $reference[2]['signature'], t('Empty signature parsed.'));
+
+    // Empty summary and signature.
+    $this->assertEqual($parsed[3]['summary'], $reference[3]['summary'], t('Empty summary line parsed.'));
+    $this->assertEqual($parsed[3]['signature'], $reference[3]['signature'], t('Empty signature parsed.'));
+  }
+}

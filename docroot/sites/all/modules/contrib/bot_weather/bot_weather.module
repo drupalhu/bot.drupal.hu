@@ -1,0 +1,77 @@
+<?php
+
+/**
+ * @file
+ */
+
+define('FORECASTIO_API_KEY', '7559c9a3361b27e453a4c5646fbeadbb');
+
+function bot_weather_libraries_info() {
+  $libraries['forecast.io-php-api'] = array(
+    'name' => 'Forecast IO',
+    'vendor url' => 'https://github.com/tobias-redmann/forecast.io-php-api',
+    'download url' => 'https://github.com/tobias-redmann/forecast.io-php-api',
+    'version' => '1.0',
+    'files' => array(
+      'php' => array('lib/forecast.io.php'),
+    ),
+  );
+  return $libraries;
+}
+
+/**
+ * Implements hook_help().
+ */
+function bot_weather_help($path, $args) {
+  switch ($path) {
+    case 'irc:features':
+      return array(t('Weather'));
+    case 'irc:features#weather':
+      return t('Get weather forecast on IRC. Syntax: <botname> weather <city>');
+  }
+}
+
+function bot_weather_irc_msg_channel($data, $from_query = FALSE) {
+  $to = $from_query ? $data->nick : $data->channel;
+  $addressed = bot_name_regexp();
+
+  if (preg_match("/^$addressed weather (.*)/i", trim($data->message), $matches)) {
+    bot_weather_respond($to, $matches[2]);
+  }
+}
+
+/**
+ * All responses are available via a query.
+ */
+function bot_weather_irc_msg_query($data) {
+  bot_weather_irc_msg_channel($data, TRUE);
+}
+
+function bot_weather_respond($to, $city) {
+  if (($library = libraries_load('forecast.io-php-api')) && !empty($library['loaded'])) {
+    $temperature = bot_weather_retreive_weather($city);
+    bot_message($to, t('Currently its @degrees˚C in @city', array('@degrees' => $temperature, '@city' => $city)));
+  }
+  else {
+    bot_message($to, t('I am sorry, the weather API has not been set up correctly.'));
+  }
+}
+
+function bot_weather_retreive_weather($address) {
+  // First geo-decode the city.
+  $point = geocoder('google', $address);
+  $coordinates = $point->coords;
+
+  // Then get the API
+  $api_key = variable_get('forecastio_api_key', FORECASTIO_API_KEY);
+  $forecast = new ForecastIO($api_key);
+
+  $condition = $forecast->getCurrentConditions($coordinates[1], $coordinates[0]);
+
+  if (!$condition) {
+    return FALSE;
+  }
+  else {
+    return $condition->getTemperature();
+  }
+}

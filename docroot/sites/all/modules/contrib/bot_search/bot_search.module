@@ -1,0 +1,95 @@
+<?php
+
+/**
+ * @file
+ * Integration between the bot and google APIs.
+ */
+
+/**
+ * Implements hook_help().
+ */
+function bot_search_help($path, $args) {
+  switch ($path) {
+    case 'irc:features':
+      return array(t('Search'), t('Calculator'));
+    case 'irc:features#search':
+      return t('Search from IRC. Syntax: search keywords here');
+    case 'irc:features#calculator':
+      return t('Convert quantities to different units using the Google calculator. Syntax: botname: convert <amount> <unit> to <unit> or botname: convert <unit> <amount> to <unit>');
+  }
+}
+
+function bot_search_irc_msg_channel($data, $from_query = FALSE) {
+  $to = $from_query ? $data->nick : $data->channel;
+  $addressed = bot_name_regexp();
+
+  if (preg_match("/^search (.*)/i", trim($data->message), $matches)) {
+    bot_search_execute_search($to, $matches[1]);
+  }
+  if (preg_match("/^$addressed s (.*)/i", $data->message, $matches)) {
+    bot_search_execute_search($to, $matches[2]);
+  }
+
+  if (preg_match("/^$addressed convert (\d+)*(.*?) to (.*?)$/i", $data->message, $matches)) {
+    bot_search_execute_calculator($to, $matches[2], $matches[3], $matches[4]);
+  }
+}
+
+function bot_search_execute_calculator($to, $amount, $from_unit, $to_unit) {
+  $query = drupal_http_build_query(array(
+    'hl' => 'en',
+    'q' => "$amount$from_unit=?$to_unit",
+  ));
+  $url = "http://www.google.com/ig/calculator?$query";
+  $result = drupal_http_request($url);
+
+  // The google calculator returns malformed JSON (no quotes around the keys, json_decode chokes.
+  $fix = array(
+    '{' => '{"',
+    ':' => '":',
+    ',' => ',"',
+  );
+  $data = utf8_encode(str_replace(array_keys($fix), array_values($fix), $result->data));
+  $data = drupal_json_decode($data);
+  if ($data['error']) {
+    bot_message($to, t('Query encountered an error: @error', array('@error' => $data['error'])));
+  }
+  else {
+    bot_message($to, t('@question is @answer', array('@question' => $data['lhs'], '@answer' => $data['rhs'])));
+  }
+}
+
+function bot_search_execute_search($to, $keywords) {
+  $search = bot_search_search($keywords);
+  if (!empty($search[0]['url'])) {
+    $output = t("@title => @url - more results: @more",
+      array(
+        '@title' => truncate_utf8($search[0]['titleNoFormatting'], 40, TRUE, TRUE),
+        '@url' => $search[0]['url'],
+        '@more' => "http://google.com/search?" . drupal_http_build_query(array('q' => $keywords)),
+      )
+    );
+  }
+  else {
+    $output = t('Your search - "!keywords" - did not match any documents.', array('!keywords' => $keywords));
+  }
+  bot_message($to, $output);
+}
+
+/**
+ * All responses are available via a query.
+ */
+function bot_search_irc_msg_query($data) {
+  bot_search_irc_msg_channel($data, TRUE);
+}
+
+/**
+ * Search Google using the API.
+ */
+function bot_search_search($keywords) {
+  $query = drupal_http_build_query(array('v' => '1.0', 'q' => $keywords));
+  $google = "http://ajax.googleapis.com/ajax/services/search/web?$query";
+  $result = drupal_http_request($google);
+  $response = drupal_json_decode($result->data);
+  return $response['responseData']['results'];
+}
