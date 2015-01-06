@@ -3,4 +3,4 @@
 files/
 sites/*/files
 sites/*/private
-sites/bot.local
+docroot/sites/bot.local
