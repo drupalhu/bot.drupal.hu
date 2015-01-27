@@ -7,5 +7,3 @@ cd /usr/local/src/drush
 git checkout 6.5.0
 ln -s /usr/local/src/drush/drush /usr/bin/drush
 composer install
-drush --version
-
