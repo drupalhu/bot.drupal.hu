@@ -17,7 +17,9 @@ COPY config/drush_install /root/
 
 RUN cd /var/www && git clone https://github.com/drupalhu/bot.drupal.hu.git
 RUN /bin/sh /root/drush_install
-RUN drush --version
+RUN mkdir /var/www/bot.drupal.hu/docroot/sites/default/files
+RUN chown www-data:www-data /var/www/bot.drupal.hu/docroot/sites/default/files
+RUN a2enmod rewrite
 
 COPY config/run.sh /root/
 COPY config/settings.php /var/www/bot.drupal.hu/docroot/sites/default/
