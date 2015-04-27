@@ -108,7 +108,7 @@ function bot_seen_irc_msg_action($data) {
 function bot_seen_all_nicks_for_regexp() {
   global $irc; $nicks = array();
   foreach ($irc->channel as $channel_name => $data) {
-    foreach ($irc->channel[$channel_name]->users as $nick_name => $data) {
+    foreach (array_filter(array_keys($irc->channel[$channel_name]->users)) as $nick_name) {
       $nick_name = preg_quote($nick_name, '/');
       $nick_name = preg_replace('/^(\\\\?.)(.*)/', '(\1)(\2)', $nick_name);
       $nicks[] = '/\b' . $nick_name . '\b/i';
